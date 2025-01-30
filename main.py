@@ -930,7 +930,16 @@ def main():
     # Запускаем keep-alive (для Replit)
     keep_alive()
 
-    BOT_TOKEN = "7596996516:AAHMTkEHVsWV-ZTt62RI3oikt91UfMvhNMs"  # <-- Вставьте свой токен
+    from dotenv import load_dotenv
+import os
+
+# Загружаем переменные из файла safespace_drugaddict/bot_token.env
+load_dotenv("safespace_drugaddict/bot_token.env")
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Читаем токен из .env
+
+if not BOT_TOKEN:
+    raise ValueError("Ошибка: Не найден BOT_TOKEN в safespace_drugaddict/bot_token.env")
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     logging.info("Бот запускается...")
