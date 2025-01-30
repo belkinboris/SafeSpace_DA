@@ -25,14 +25,16 @@ from telegram.ext import (
 # ------------------------------------------------------------------------
 # KEEP-ALIVE (мини-сервер Flask)
 # ------------------------------------------------------------------------
-app = Flask(__name__)
+flask_app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Я жив!"
 
 def run_server():
-    app.run(host='0.0.0.0', port=8080)
+    import os
+    port = int(os.getenv("PORT", "8080"))  # fallback to 8080 locally
+    flask_app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run_server)
