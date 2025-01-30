@@ -933,13 +933,9 @@ def main():
     from dotenv import load_dotenv
 import os
 
-# Загружаем переменные из файла safespace_drugaddict/bot_token.env
-load_dotenv("safespace_drugaddict/bot_token.env")
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Читаем токен из .env
-
+BOT_TOKEN = os.getenv("token_da")  
 if not BOT_TOKEN:
-    raise ValueError("Ошибка: Не найден BOT_TOKEN в safespace_drugaddict/bot_token.env")
+    raise ValueError("No token_da found in environment variables!")
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     logging.info("Бот запускается...")
