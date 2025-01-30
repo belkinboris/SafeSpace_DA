@@ -1,3 +1,4 @@
+import os
 import logging
 import random
 import datetime
@@ -22,26 +23,35 @@ from telegram.ext import (
     filters
 )
 
+
 # ------------------------------------------------------------------------
-# KEEP-ALIVE (мини-сервер Flask)
+# 1) ЧТЕНИЕ TOKEN ИЗ ОКРУЖЕНИЯ
+# ------------------------------------------------------------------------
+BOT_TOKEN = os.getenv("token_da")
+if not BOT_TOKEN:
+    raise ValueError("No token_da found in environment variables!")
+
+
+# ------------------------------------------------------------------------
+# 2) FLASK (мини-сервер) - KEEP ALIVE
 # ------------------------------------------------------------------------
 flask_app = Flask(__name__)
 
-@app.route('/')
+@flask_app.route('/')
 def home():
     return "Я жив!"
 
 def run_server():
-    import os
-    port = int(os.getenv("PORT", "8080"))  # fallback to 8080 locally
+    port = int(os.getenv("PORT", "8080"))  # Railway provides PORT
     flask_app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run_server)
     t.start()
 
+
 # ------------------------------------------------------------------------
-# ЛОГИРОВАНИЕ
+# 3) ЛОГИРОВАНИЕ
 # ------------------------------------------------------------------------
 logging.basicConfig(
     filename='bot.log',
@@ -49,36 +59,23 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
 )
 
+
 # ------------------------------------------------------------------------
-# ГЛОБАЛЬНЫЕ СТРУКТУРЫ ДАННЫХ
+# 4) ГЛОБАЛЬНЫЕ СТРУКТУРЫ ДАННЫХ
 # ------------------------------------------------------------------------
-
-# { user_id: {"nickname": str, "code": str, "chat_id": int, "last_activity": datetime, ...} }
-users_in_chat = {}
-
-# { user_id: {"nickname": str, "code": str, "join_count": int}, ... }
-users_history = {}
-
-# Список (nick, code, time) — кто недавно вышел
-parted_users = []
-
-# Личные сообщения: { user_id: [ {"from": from_nick, "text": msg_text}, ... ] }
-private_messages = {}
-
-# Настройки уведомлений (заглушка, можно развивать)
-user_notify_settings = {}
-
-# Опросы (inline-голосования)
-polls = {}
-
-# Для возможных ролей (админ, модератор), если нужно
+users_in_chat = {}       # { user_id: {...} }
+users_history = {}       # { user_id: {...} }
+parted_users = []        # [(nick, code, time), ...]
+private_messages = {}    # { user_id: [ { from, text }, ... ] }
+user_notify_settings = {}# { user_id: {...} }
+polls = {}               # { creator_id: {...} }
 admin_ids = set()
 moderator_ids = set()
 
-# ------------------------------------------------------------------------
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# ------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------
+# 5) ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ------------------------------------------------------------------------
 def generate_nickname():
     """Случайный ник."""
     return f"👤{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz', k=6))}"
@@ -100,9 +97,7 @@ def ensure_user_in_dicts(user_id: int):
         }
 
 def get_user_role(user_id: int) -> str:
-    """
-    Роль: admin | moderator | new | resident
-    """
+    """Роль: admin | moderator | new | resident"""
     if user_id in admin_ids:
         return "admin"
     if user_id in moderator_ids:
@@ -144,29 +139,34 @@ def update_last_activity(user_id: int):
     if user_id in users_in_chat:
         users_in_chat[user_id]["last_activity"] = datetime.datetime.now()
 
-async def broadcast_text(app, text: str, exclude_user: int = None):
+
+# Широковещательная рассылка текста
+async def broadcast_text(telegram_app, text: str, exclude_user: int = None):
     """Рассылка текста всем, кроме exclude_user."""
     for uid, info in users_in_chat.items():
         if uid == exclude_user:
             continue
         try:
-            await app.bot.send_message(chat_id=info["chat_id"], text=text)
+            await telegram_app.bot.send_message(chat_id=info["chat_id"], text=text)
         except Exception as e:
             logging.warning(f"Ошибка отправки текста {info['nickname']}: {e}")
 
-async def broadcast_photo(app, photo_file_id: str, caption: str = "", exclude_user: int = None):
+
+# Широковещательная рассылка фото
+async def broadcast_photo(telegram_app, photo_file_id: str, caption: str = "", exclude_user: int = None):
     """Рассылка фото всем, кроме exclude_user."""
     for uid, info in users_in_chat.items():
         if uid == exclude_user:
             continue
         try:
-            await app.bot.send_photo(
+            await telegram_app.bot.send_photo(
                 chat_id=info["chat_id"],
                 photo=photo_file_id,
                 caption=caption
             )
         except Exception as e:
             logging.warning(f"Ошибка отправки фото {info['nickname']}: {e}")
+
 
 def parse_replied_nickname(bot_message_text: str) -> str:
     """
@@ -178,8 +178,9 @@ def parse_replied_nickname(bot_message_text: str) -> str:
         return ""
     return m.group(1).strip()
 
+
 # ------------------------------------------------------------------------
-# /start, /stop
+# 6) ХЕНДЛЕРЫ КОМАНД: /start, /stop
 # ------------------------------------------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -195,12 +196,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_last_activity(user_id)
         return
 
+    # Если пользователь уже заходил ранее
     if user_id in users_history:
         nickname = users_history[user_id]["nickname"]
         code = users_history[user_id]["code"]
         users_history[user_id]["join_count"] = users_history[user_id].get("join_count", 0) + 1
         join_count = users_history[user_id]["join_count"]
     else:
+        # Первый раз
         nickname = generate_nickname()
         code = generate_personal_code()
         users_history[user_id] = {
@@ -210,6 +213,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         join_count = 1
 
+    # Вставляем в активный список
     users_in_chat[user_id] = {
         "nickname": nickname,
         "code": code,
@@ -217,6 +221,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "last_activity": datetime.datetime.now()
     }
 
+    # Приветственное сообщение
     await update.message.reply_text(
         f"[BOT] Добро пожаловать в анонимный чат для людей, столкнувшихся с наркотической зависимостью!\n"
         "Чтобы выйти — /stop.\n\n"
@@ -225,15 +230,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Приятного общения!"
     )
 
+    # Сообщение в общий чат о входе
     if join_count == 1:
-        # впервые
         msg_broadcast = f"[Bot] {code} {nickname} входит в чат. Он новенький!"
     else:
-        # не в первый раз
         msg_broadcast = f"[Bot] {code} {nickname} входит в чат."
 
     await broadcast_text(context.application, msg_broadcast, exclude_user=user_id)
     logging.info(f"Пользователь {user_id} => {nickname} (join_count={join_count}).")
+
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -249,14 +254,13 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(parted_users) > 20:
         parted_users.pop()
 
-    await update.message.reply_text(
-        "[BOT] Ты вышел из чата. Возвращайся в любой момент через /start."
-    )
+    await update.message.reply_text("[BOT] Ты вышел из чата. Возвращайся в любой момент через /start.")
     await broadcast_text(context.application, f"[Bot] {code} {nickname} вышел из чата.", exclude_user=user_id)
     logging.info(f"Пользователь {user_id} («{nickname}») вышел из чата.")
 
+
 # ------------------------------------------------------------------------
-# СМЕНА НИКА /nick (ConversationHandler)
+# 7) СМЕНА НИКА /nick (ConversationHandler)
 # ------------------------------------------------------------------------
 NICK_WAITING = range(1)
 
@@ -287,10 +291,7 @@ async def nick_new_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users_history[user_id]["nickname"] = new_nick
 
     await update.message.reply_text(f"[BOT] Новый ник: {new_nick}.")
-    await broadcast_text(
-        context.application,
-        f"[Bot] {code} {old_nick} сменил(а) ник на {new_nick}."
-    )
+    await broadcast_text(context.application, f"[Bot] {code} {old_nick} сменил(а) ник на {new_nick}.")
     update_last_activity(user_id)
     logging.info(f"{user_id} сменил ник с {old_nick} на {new_nick}.")
     return ConversationHandler.END
@@ -299,15 +300,16 @@ async def nick_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("[BOT] Отменено.")
     return ConversationHandler.END
 
+
 # ------------------------------------------------------------------------
-# /list, /last
+# 8) /list, /last
 # ------------------------------------------------------------------------
 async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not users_in_chat:
         await update.message.reply_text("[BOT] В чате никого нет.")
         return
 
-    total_possible = 81795
+    total_possible = 81795  # Шутливое число из исходного кода :)
     lines = []
     now = datetime.datetime.now()
 
@@ -338,8 +340,9 @@ async def last_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
     update_last_activity(update.effective_user.id)
 
+
 # ------------------------------------------------------------------------
-# /help, /rules, /about, /ping
+# 9) /help, /rules, /about, /ping
 # ------------------------------------------------------------------------
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = (
@@ -391,8 +394,9 @@ async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Pong!")
     update_last_activity(update.effective_user.id)
 
+
 # ------------------------------------------------------------------------
-# ЛИЧНЫЕ СООБЩЕНИЯ /msg
+# 10) ЛИЧНЫЕ СООБЩЕНИЯ /msg
 # ------------------------------------------------------------------------
 MSG_SELECT_RECIPIENT, MSG_ENTER_TEXT = range(2)
 
@@ -427,7 +431,7 @@ async def msg_command_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_last_activity(user_id)
         return ConversationHandler.END
 
-    # иначе inline-список
+    # иначе — показать inline-список (кнопочки) всех
     keyboard = []
     row = []
     i = 0
@@ -489,10 +493,10 @@ async def msg_enter_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     to_nick = users_in_chat[recipient_id]["nickname"]
 
     ensure_user_in_dicts(recipient_id)
-    # Сохраняем
+    # Сохраняем копию
     private_messages[recipient_id].append({"from": from_nick, "text": text_msg})
 
-    # Отправляем
+    # Отправляем получателю
     chat_to = users_in_chat[recipient_id]["chat_id"]
     await context.application.bot.send_message(
         chat_id=chat_to,
@@ -533,8 +537,9 @@ async def getmsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
     update_last_activity(user_id)
 
+
 # ------------------------------------------------------------------------
-# /hug
+# 11) /hug
 # ------------------------------------------------------------------------
 HUG_SELECT = range(1)
 
@@ -610,8 +615,9 @@ async def hug_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     return ConversationHandler.END
 
+
 # ------------------------------------------------------------------------
-# /search
+# 12) /search
 # ------------------------------------------------------------------------
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -635,8 +641,9 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("[BOT] Никого не нашли.")
     update_last_activity(user_id)
 
+
 # ------------------------------------------------------------------------
-# /poll
+# 13) /poll
 # ------------------------------------------------------------------------
 POLL_AWAITING_QUESTION = range(1)
 
@@ -721,6 +728,7 @@ async def poll_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     polls[user_id]["active"] = False
     await update.message.reply_text("[BOT] Твой опрос завершён.")
 
+    # Уберём кнопки у всех
     for uid, msg_id in polls[user_id]["message_ids"].items():
         chat_id = polls[user_id]["chat_ids"][uid]
         try:
@@ -759,12 +767,14 @@ async def poll_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     chosen_opt = options[opt_index]
+    # Снимаем предыдущие голоса
     for opt in options:
         if user_id in poll_data["votes"][opt]:
             poll_data["votes"][opt].remove(user_id)
     poll_data["votes"][chosen_opt].add(user_id)
     await query.answer("Голос учтён!")
 
+    # Пересобираем текст (результаты)
     question = poll_data["question"]
     out_lines = [question]
     for i, opt in enumerate(options, start=1):
@@ -773,7 +783,7 @@ async def poll_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         out_lines.append(f"{mark} - {opt} ({c})")
 
     new_text = "\n".join(out_lines)
-    # Обновим у всех
+    # Обновим сообщение у всех
     for uid, msg_id in poll_data["message_ids"].items():
         chat_id = poll_data["chat_ids"][uid]
         try:
@@ -788,8 +798,9 @@ async def poll_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     update_last_activity(user_id)
 
+
 # ------------------------------------------------------------------------
-# /notify (демо)
+# 14) /notify (демо)
 # ------------------------------------------------------------------------
 def build_notify_keyboard(user_id: int):
     s = user_notify_settings[user_id]
@@ -850,8 +861,9 @@ async def notify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("Настройка сохранена.")
     update_last_activity(user_id)
 
+
 # ------------------------------------------------------------------------
-# ОБРАБОТКА СООБЩЕНИЙ: текст + фото. Убраны $ и #, остался %.
+# 15) ОБРАБОТКА СООБЩЕНИЙ (текст + фото)
 # ------------------------------------------------------------------------
 async def anonymous_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -875,21 +887,22 @@ async def anonymous_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update_last_activity(user_id)
         return
 
-    # Текст
+    # Иначе текст
     text = update.message.text.strip()
     replied_nick = ""
     if update.message.reply_to_message and update.message.reply_to_message.from_user.id == context.application.bot.id:
         replied_nick = parse_replied_nickname(update.message.reply_to_message.text)
 
     if text.startswith("%"):
+        # Третье лицо
         out_text = text[1:].lstrip()
         if replied_nick:
             final_text = f"{nickname} (reply to {replied_nick}) {out_text}"
         else:
             final_text = f"{nickname} {out_text}"
         await broadcast_text(context.application, final_text, exclude_user=user_id)
-
     else:
+        # Обычное сообщение
         if replied_nick:
             final_text = f"{nickname} (reply to {replied_nick}): {text}"
         else:
@@ -898,10 +911,11 @@ async def anonymous_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     update_last_activity(user_id)
 
+
 # ------------------------------------------------------------------------
-# УСТАНОВКА КОМАНД (для подсказок в клиенте), post_init
+# 16) УСТАНОВКА КОМАНД ДЛЯ МЕНЮ, post_init
 # ------------------------------------------------------------------------
-async def set_bot_commands(application):
+async def set_bot_commands(telegram_app):
     commands = [
         BotCommand("start", "Войти в чат"),
         BotCommand("stop", "Выйти из чата"),
@@ -920,29 +934,24 @@ async def set_bot_commands(application):
         BotCommand("about", "О боте"),
         BotCommand("help", "Помощь"),
     ]
-    await application.bot.set_my_commands(commands)
+    await telegram_app.bot.set_my_commands(commands)
 
-async def post_init(application):
-    await set_bot_commands(application)
+async def post_init(telegram_app):
+    await set_bot_commands(telegram_app)
+
 
 # ------------------------------------------------------------------------
-# ГЛАВНАЯ ФУНКЦИЯ
+# 17) ГЛАВНАЯ ФУНКЦИЯ
 # ------------------------------------------------------------------------
 def main():
-    # Запускаем keep-alive (для Replit)
+    # Запускаем Flask (keep-alive) в фоновом потоке
     keep_alive()
 
-    from dotenv import load_dotenv
-import os
-
-BOT_TOKEN = os.getenv("token_da")  
-if not BOT_TOKEN:
-    raise ValueError("No token_da found in environment variables!")
-
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Создаём Telegram-приложение
+    bot_app = ApplicationBuilder().token(BOT_TOKEN).build()
     logging.info("Бот запускается...")
 
-    # Conversation /nick
+    # 1) Conversation /nick
     nick_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("nick", nick_command_start)],
         states={
@@ -951,8 +960,7 @@ if not BOT_TOKEN:
         fallbacks=[CommandHandler("cancel", nick_cancel)]
     )
 
-    # /poll
-    POLL_AWAITING_QUESTION = range(1)
+    # 2) Conversation /poll
     poll_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("poll", poll_command)],
         states={
@@ -963,8 +971,7 @@ if not BOT_TOKEN:
         fallbacks=[CommandHandler("cancel", poll_cancel)]
     )
 
-    # /msg
-    MSG_SELECT_RECIPIENT, MSG_ENTER_TEXT = range(2)
+    # 3) Conversation /msg
     msg_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("msg", msg_command_start)],
         states={
@@ -979,8 +986,7 @@ if not BOT_TOKEN:
         fallbacks=[CallbackQueryHandler(msg_callback_cancel, pattern="^msg_cancel$")]
     )
 
-    # /hug
-    HUG_SELECT = range(1)
+    # 4) Conversation /hug
     hug_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("hug", hug_command)],
         states={
@@ -993,39 +999,43 @@ if not BOT_TOKEN:
     )
 
     # Регистрируем хендлеры
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stop", stop))
+    bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(CommandHandler("stop", stop))
 
-    app.add_handler(nick_conv_handler)
-    app.add_handler(CommandHandler("list", list_users))
-    app.add_handler(CommandHandler("last", last_users))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("rules", rules))
-    app.add_handler(CommandHandler("about", about))
-    app.add_handler(CommandHandler("ping", ping))
+    bot_app.add_handler(nick_conv_handler)
+    bot_app.add_handler(CommandHandler("list", list_users))
+    bot_app.add_handler(CommandHandler("last", last_users))
+    bot_app.add_handler(CommandHandler("help", help_command))
+    bot_app.add_handler(CommandHandler("rules", rules))
+    bot_app.add_handler(CommandHandler("about", about))
+    bot_app.add_handler(CommandHandler("ping", ping))
 
-    app.add_handler(msg_conv_handler)
-    app.add_handler(CommandHandler("getmsg", getmsg_command))
+    bot_app.add_handler(msg_conv_handler)
+    bot_app.add_handler(CommandHandler("getmsg", getmsg_command))
 
-    app.add_handler(hug_conv_handler)
-    app.add_handler(CommandHandler("search", search_command))
+    bot_app.add_handler(hug_conv_handler)
+    bot_app.add_handler(CommandHandler("search", search_command))
 
-    app.add_handler(poll_conv_handler)
-    app.add_handler(CommandHandler("polldone", poll_done))
+    bot_app.add_handler(poll_conv_handler)
+    bot_app.add_handler(CommandHandler("polldone", poll_done))
 
-    app.add_handler(CommandHandler("notify", notify_command))
-    app.add_handler(CallbackQueryHandler(notify_callback, pattern="^notify\\|"))
+    bot_app.add_handler(CommandHandler("notify", notify_command))
+    bot_app.add_handler(CallbackQueryHandler(notify_callback, pattern="^notify\\|"))
 
-    app.add_handler(CallbackQueryHandler(poll_vote_callback, pattern="^pollvote\\|"))
+    bot_app.add_handler(CallbackQueryHandler(poll_vote_callback, pattern="^pollvote\\|"))
 
-    # Все остальные сообщения (текст/фото)
-    app.add_handler(MessageHandler(~filters.COMMAND & (filters.TEXT | filters.PHOTO), anonymous_message))
+    # Обработка сообщений (текст/фото)
+    bot_app.add_handler(MessageHandler(~filters.COMMAND & (filters.TEXT | filters.PHOTO), anonymous_message))
 
-    # Устанавливаем post_init
-    app.post_init = post_init
+    # post_init для установки /команд
+    bot_app.post_init = post_init
 
-    # Запуск бота
-    app.run_polling()
+    # Запуск
+    bot_app.run_polling()
 
+
+# ------------------------------------------------------------------------
+# Запуск
+# ------------------------------------------------------------------------
 if __name__ == "__main__":
     main()
