@@ -223,7 +223,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Приветственное сообщение
     await update.message.reply_text(
-        f"[BOT] Добро пожаловать в анонимный чат для людей, столкнувшихся с наркотической зависимостью!\n"
+        f"[BOT] Добро пожаловать в анонимный чат для людей, столкнувшихся с наркотической зависимостью! Это пространство создано для взаимопомощи и поддержки. Поделись с чатом, а чат поделится с тобой! 😊 \n"
         "Чтобы выйти — /stop.\n\n"
         f"Твой ник: {nickname}\n"
         f"Твой код: {code}\n"
@@ -309,7 +309,7 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("[BOT] В чате никого нет.")
         return
 
-    total_possible = 81795  # Шутливое число из исходного кода :)
+    total_possible = 100  # Шутливое число из исходного кода :)
     lines = []
     now = datetime.datetime.now()
 
@@ -326,20 +326,6 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
     update_last_activity(update.effective_user.id)
 
-async def last_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not parted_users:
-        await update.message.reply_text("[BOT] Никто недавно не выходил.")
-        return
-
-    lines = []
-    for (nick, code, dt) in parted_users[:10]:
-        t_str = dt.strftime("%H:%M:%S")
-        lines.append(f"{code} {nick} (вышел в {t_str})")
-
-    msg = "[BOT] Последние вышедшие:\n" + "\n".join(lines)
-    await update.message.reply_text(msg)
-    update_last_activity(update.effective_user.id)
-
 
 # ------------------------------------------------------------------------
 # 9) /help, /rules, /about, /ping
@@ -351,9 +337,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/stop - Выйти из чата\n"
         "/nick - Сменить ник\n"
         "/list - Список пользователей\n"
-        "/last - Недавно вышедшие\n"
         "/msg - Отправить личное сообщение\n"
-        "/getmsg - Посмотреть свои личные сообщения\n"
+        "/getmsg - Получить личные сообщения\n"
         "/hug [CODE] - Обнять пользователя\n"
         "/search [ТЕКСТ] - Поиск пользователя по нику\n"
         "/poll - Создать опрос\n"
@@ -921,7 +906,6 @@ async def set_bot_commands(telegram_app):
         BotCommand("stop", "Выйти из чата"),
         BotCommand("nick", "Сменить ник"),
         BotCommand("list", "Список пользователей"),
-        BotCommand("last", "Последние вышедшие"),
         BotCommand("msg", "Отправить ЛС"),
         BotCommand("getmsg", "Получить ЛС"),
         BotCommand("hug", "Обнять"),
@@ -1004,7 +988,6 @@ def main():
 
     bot_app.add_handler(nick_conv_handler)
     bot_app.add_handler(CommandHandler("list", list_users))
-    bot_app.add_handler(CommandHandler("last", last_users))
     bot_app.add_handler(CommandHandler("help", help_command))
     bot_app.add_handler(CommandHandler("rules", rules))
     bot_app.add_handler(CommandHandler("about", about))
